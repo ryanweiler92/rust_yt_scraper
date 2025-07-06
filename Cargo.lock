@@ -1073,8 +1073,11 @@ name = "rust-youtube-scraper"
 version = "0.1.0"
 dependencies = [
  "async-std",
+ "base64",
+ "percent-encoding",
  "regex",
  "reqwest",
+ "serde",
  "serde_json",
 ]
 
