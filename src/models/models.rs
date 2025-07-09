@@ -19,9 +19,15 @@ pub struct VideoInfo {
 pub struct Comment {
     pub comment_id: String,
     pub channel_id: String,
+    pub video_id: String,
     pub display_name: String,
     pub user_verified: bool,
     pub thumbnail: String,
     pub content: String,
     pub published_time: String,
+    pub like_count: String,
+    pub reply_count: String,
+    pub comment_level: u8,
+    pub reply_to: String,
+    pub reply_order: i32,
 }

@@ -19,7 +19,16 @@ impl YoutubeExtractor {
         fs::write("COMMENT.json", string_json).await?;
         Ok("Successfully wrote comments to COMMENT.json".to_string())
     }
-    pub async fn comment_extractor(&self, data: &Value) -> Option<Vec<Comment>> {
+
+    pub async fn reply_extractor(&self, api_key: &String, continuation_token: &String, reply_count: &i32, comment_id: &String) {
+
+        let replies_json = self.comments_request(&api_key, &continuation_token).await.unwrap_or_default();
+        let replies_json_string = serde_json::to_string_pretty(&replies_json).unwrap_or_default();
+        fs::write("replies.json", replies_json_string).await;
+
+
+    }
+    pub async fn comment_extractor(&self, data: &Value, api_key: &String, video_id: &String) -> Option<Vec<Comment>> {
         let mut comments: Vec<Comment> = Vec::new();
 
         let comment_content_list_test = data
@@ -38,6 +47,15 @@ impl YoutubeExtractor {
             .as_array()?;
 
         println!("comment_content_list_actual length == {}", comment_content_list_actual.len());
+        let continuation_items_list_actual = data
+            .get("onResponseReceivedEndpoints")?
+            .get(1)?
+            .get("reloadContinuationItemsCommand")?
+            .get("continuationItems")?
+            .as_array()?;
+
+        let continuation_list_test = serde_json::to_string_pretty(&continuation_items_list_actual).unwrap_or_default();
+        fs::write("continuation_items_test.json", continuation_list_test).await;
 
         for (index, comment_content) in comment_content_list_actual.iter().enumerate() {
             let author_info_json = match comment_content
@@ -46,7 +64,7 @@ impl YoutubeExtractor {
                 .and_then(|c| c.get("author")) {
                 Some(author_json) => author_json,
                 None => {
-                    println!("The comment of index {} does not contain an author block. Skipping..", index);
+                    // println!("The comment of index {} does not contain an author block. Skipping..", index);
                     continue
                 }
             };
@@ -137,14 +155,69 @@ impl YoutubeExtractor {
                     }
                 };
 
+            let like_count = match self.get_text_from_path(&toolbar_json, &["likeCountNotliked"]) {
+                Some(like) => like,
+                None => {
+                    println!("Missing like count on index {}", index);
+                    "MISSING_LIKED_COUNT".to_string()
+                }
+            };
+
+            let reply_count = match self.get_text_from_path(&toolbar_json, &["replyCount"]) {
+                Some(reply) => {
+                    if reply.is_empty(){
+                        "0".to_string()
+                    } else {
+                        reply
+                    }
+                },
+                None => {
+                    println!("Missing reply count on index {}", index);
+                    "MISSING_REPLY_COUNT".to_string()
+                }
+            };
+
+            let reply_count_int: i32 = reply_count.parse().unwrap_or_default();
+
+            if (reply_count_int > 0) {
+                let mut comment_continuation_token = "".to_string();
+
+                for continuation_block in continuation_items_list_actual.iter() {
+                    let continuation_comment_id = self.get_text_from_path(&continuation_block, &["commentThreadRenderer", "commentViewModel", "commentViewModel", "commentId"]).unwrap_or_default();
+
+                    if (&continuation_comment_id == &comment_id) {
+                        comment_continuation_token = self.get_text_from_path(&continuation_block, &["commentThreadRenderer", "replies", "commentRepliesRenderer", "contents", "0", "continuationItemRenderer", "continuationEndpoint", "continuationCommand", "token"]).unwrap_or_default();
+                    }
+                }
+
+                if (comment_continuation_token.is_empty()) {
+                    println!("Failed to retrieve continuation token...")
+                } else {
+                    println!("Continuation Token {}", comment_continuation_token);
+                    self.reply_extractor(&api_key, &comment_continuation_token, &reply_count_int, &comment_id).await;
+                }
+            } else {
+                println!("Did not attempt to get continuation token because replies are 0.")
+            }
+
+            let owned_video_id = video_id.to_owned();
+
+
             let comment_info = Comment{
                 comment_id,
                 channel_id,
                 display_name,
+                video_id: owned_video_id,
                 user_verified,
                 thumbnail,
                 content,
-                published_time
+                published_time,
+                like_count,
+                reply_count,
+                comment_level: 0,
+                reply_order: 0,
+                reply_to: "".to_string(),
+
             };
 
             comments.push(comment_info);
@@ -228,9 +301,9 @@ impl YoutubeExtractor {
         println!("Continuation Token: {}", continuation_token);
         println!("API Key: {}", api_key);
         
-        let comments_data = self.comments_request(& api_key, &continuation_token).await?;
+        let comments_data = self.comments_request(&api_key, &continuation_token).await?;
 
-        let comments = self.comment_extractor(&comments_data).await.unwrap_or_default();
+        let comments = self.comment_extractor(&comments_data, &api_key, &video_id).await.unwrap_or_default();
 
         println!("Captured {} comments!", comments.len());
 
