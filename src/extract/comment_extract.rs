@@ -28,7 +28,7 @@ impl YoutubeExtractor {
 
 
     }
-    pub async fn comment_extractor(&self, data: &Value, api_key: &String, video_id: &String) -> Option<Vec<Comment>> {
+    pub async fn comment_extractor(&self, data: &Value, api_key: &String, video_id: &str) -> Option<Vec<Comment>> {
         let mut comments: Vec<Comment> = Vec::new();
 
         let comment_content_list_test = data
@@ -303,7 +303,7 @@ impl YoutubeExtractor {
         
         let comments_data = self.comments_request(&api_key, &continuation_token).await?;
 
-        let comments = self.comment_extractor(&comments_data, &api_key, &video_id).await.unwrap_or_default();
+        let comments = self.comment_extractor(&comments_data, &api_key, video_id).await.unwrap_or_default();
 
         println!("Captured {} comments!", comments.len());
 
