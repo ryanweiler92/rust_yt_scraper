@@ -1,10 +1,10 @@
 use async_std::fs;
 use serde_json::{json, Value};
 use regex::Regex;
-
 use crate::models::VideoInfo;
-
 pub struct YoutubeExtractor;
+use tracing::{info, warn, error, debug, trace, instrument};
+
 
 impl YoutubeExtractor{
 
@@ -12,18 +12,20 @@ impl YoutubeExtractor{
         Self
     }
 
-    pub async fn extract_ytcfg(&self, webpage: &str) -> Result<Value, Box<dyn std::error::Error>> {
+    pub async fn extract_ytcfg(&self, webpage: &str, create_json_files: bool) -> Result<Value, Box<dyn std::error::Error>> {
         // Pattern 1: ytcfg.set({...})
         let pattern1 = Regex::new(r"ytcfg\.set\s*\(\s*(\{.+?\})\s*\)")?;
         if let Some(captures) = pattern1.captures(webpage) {
             if let Some(json_str) = captures.get(1) {
                 match serde_json::from_str::<Value>(json_str.as_str()) {
                     Ok(data) => {
-                        let json_str = serde_json::to_string_pretty(&data).unwrap_or_default();
-                        fs::write("ytcfg_p1.json", &json_str).await.unwrap();
+                        if create_json_files{
+                            let json_str = serde_json::to_string_pretty(&data).unwrap_or_default();
+                            fs::write("ytcfg_p1.json", &json_str).await.unwrap();
+                        }
                         return Ok(data)
                     },
-                    Err(_) => {} // Continue to next pattern
+                    Err(_) => {}
                 }
             }
         }
@@ -43,7 +45,7 @@ impl YoutubeExtractor{
             }
         }
         
-        println!("🥎🥎 Using hardcoded values. 🥎🥎");
+        debug!("🥎🥎 Using hardcoded keys. 🥎🥎");
         // Fallback to hardcoded values
         Ok(json!({
         "INNERTUBE_API_KEY": "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
@@ -161,8 +163,6 @@ impl YoutubeExtractor{
                 return Some(text);
             }
         }
-
-
         None
     }
 
@@ -278,35 +278,40 @@ impl YoutubeExtractor{
         }
     }
 
-    pub async fn extract(&self, video_id: &str){
+    #[instrument(skip(self))]
+    pub async fn extract(&self, video_id: &str, create_json_files: bool){
         let webpage = self.get_json(video_id).await.unwrap_or_default();
         let initial_data = self.extract_initial_data(&webpage).unwrap_or_default();
-        let json_str = serde_json::to_string_pretty(&initial_data).unwrap_or_default();
-        fs::write("output.json", json_str).await.unwrap();
+
+        if create_json_files {
+            let json_str = serde_json::to_string_pretty(&initial_data).unwrap_or_default();
+            fs::write("output.json", json_str).await.unwrap();
+        }
 
         let video_info = self.extract_video_info(&initial_data);
-        println!("Title: {}", video_info.title);
-        println!("Channel: {}", video_info.channel);
-        println!("Channel ID: {}", video_info.channel_id);
-        // println!("Description: {}", video_info.description);
-        println!("YT ID: {}", video_info.yt_id);
-        println!("Views: {}", video_info.views);
-        println!("Comment Count: {}", video_info.comment_count);
-        println!("Like Count: {}", video_info.like_count);
-        println!("Video Thumbnail: {}", video_info.video_thumbnail);
-        println!("Upload Date: {}", video_info.upload_date);
-        println!("Channel Thumbnail: {}", video_info.channel_thumbnail);
+
+        debug!(
+        title = %video_info.title,
+        channel = %video_info.channel,
+        channel_id = %video_info.channel_id,
+        yt_id = %video_info.yt_id,
+        views = video_info.views,
+        comment_count = video_info.comment_count,
+        like_count = video_info.like_count,
+        upload_date = %video_info.upload_date,
+        "Extracted video information"
+    );
         
-        let ytcfg = self.extract_ytcfg(&webpage).await.unwrap();
+        let ytcfg = self.extract_ytcfg(&webpage, create_json_files).await.unwrap();
         
-        let comments = self.get_comments(&initial_data, &ytcfg, &video_id).await;
+        let comments = self.get_comments(&initial_data, &ytcfg, &video_id, Some(25), create_json_files).await;
         
         match comments {
             Ok(comments_data) => {
-                println!("Comments Data: {}", comments_data)
+                debug!(comments_length = comments_data.len(), "Successfully extracted comments");
             }
             Err(e) => {
-                println!("There was an error extracting comments: {}", e);
+                error!(error = %e, video_id = video_id, "Failed to extract comments");
             }
         }
     }

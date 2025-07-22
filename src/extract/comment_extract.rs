@@ -2,8 +2,8 @@ use async_std::fs;
 use serde_json::{json, Value};
 use base64::{Engine as _, engine::general_purpose};
 use reqwest;
-use std::collections::HashMap;
 use percent_encoding::percent_decode_str;
+use tracing::{info, warn, error, debug, trace, instrument};
 
 use crate::models::Comment;
 use crate::models::CommentContent;
@@ -21,10 +21,47 @@ impl YoutubeExtractor {
         Ok("Successfully wrote comments to COMMENT.json".to_string())
     }
 
-    pub async fn reply_extractor(&self, api_key: &String, continuation_token: &String, reply_count: &i32, comment_id: &String, video_id: &str) -> Option<Vec<Comment> > {
-        let replies_json = self.comments_request(&api_key, &continuation_token).await.unwrap_or_default();
-        let replies_json_string = serde_json::to_string_pretty(&replies_json).unwrap_or_default();
-        fs::write("4_replies_4.json", replies_json_string).await;
+    pub async fn get_next_continuation_token(&self, data: &Value, request_count: &usize) -> Option<String> {
+        // Continuation tokens are in different path after initial request
+        let not_initial_request = request_count > &1;
+        let continuation_item_obj_alias = match not_initial_request {
+            true => "appendContinuationItemsAction",
+            false => "reloadContinuationItemsCommand"
+        };
+        let continuation_items_index = match not_initial_request {
+            true => 0,
+            false => 1
+        };
+
+        let continuation_items = data
+            .get("onResponseReceivedEndpoints")?
+            .get(continuation_items_index)?
+            .get(continuation_item_obj_alias)?
+            .get("continuationItems")?
+            .as_array()?;
+
+        for item in continuation_items.iter().rev() {
+            if let Some(token) = self.get_text_from_path(item, &[
+                "continuationItemRenderer",
+                "continuationEndpoint",
+                "continuationCommand",
+                "token"
+            ]) {
+                if !token.is_empty() {
+                    return Some(token);
+                }
+            }
+        }
+        None
+    }
+
+    pub async fn reply_extractor(&self, api_key: &String, continuation_token: &String, reply_count: &i32, comment_id: &String, video_id: &str, create_json_files: bool) -> Option<Vec<Comment> > {
+        let replies_json = self.comments_request(&api_key, &continuation_token, &0, false).await.unwrap_or_default();
+
+        if create_json_files{
+            let replies_json_string = serde_json::to_string_pretty(&replies_json).unwrap_or_default();
+            fs::write("4_replies_4.json", replies_json_string).await;
+        }
 
         let replies_usize: usize = *reply_count as usize;
 
@@ -45,7 +82,6 @@ impl YoutubeExtractor {
                     content
                 },
                 None => {
-                    // println!("Skipping reply comment at index {} due to missing data", index);
                     continue;
                 }
             };
@@ -53,7 +89,15 @@ impl YoutubeExtractor {
             replies.push(reply);
         }
         let extraction_diff = reply_count - replies.len() as i32;
-        println!("COMMENT ID: {}, Looking for {} replies. Extracted {} replies. Missing {} replies.",comment_id, reply_count, replies.len(), extraction_diff);
+        if extraction_diff > 0 {
+            debug!(
+                comment_id = %comment_id,
+                expected_replies = reply_count,
+                extracted_replies = replies.len(),
+                missing_replies = extraction_diff,
+                "Reply extraction summary"
+            );
+        }
 
         Some(replies)
     }
@@ -65,7 +109,6 @@ impl YoutubeExtractor {
             .and_then(|c| c.get("author")) {
             Some(author_json) => author_json,
             None => {
-                // println!("Could not locate author section.");
                 return None
             }
         };
@@ -84,11 +127,6 @@ impl YoutubeExtractor {
             .and_then(|p| p.get("commentEntityPayload"))
             .and_then(|c| c.get("toolbar"))
             .unwrap_or(&empty_toolbar_json);
-
-        let entity_key = match self.get_text_from_path(&comment_content_json, &["entityKey"]) {
-            Some(key) => key,
-            None => return None
-        };
 
         let channel_id = self.get_text_from_path(&author_info_json, &["channelId"])
             .unwrap_or_else(|| "MISSING_CHANNEL_ID".to_string());
@@ -143,16 +181,18 @@ impl YoutubeExtractor {
             reply_count,
         })
     }
-    pub async fn comment_extractor(&self, data: &Value, api_key: &String, video_id: &str) -> Option<Vec<Comment>> {
+    pub async fn comment_extractor(&self, data: &Value, api_key: &String, video_id: &str, request_count: &usize, create_json_files: bool) -> Option<Vec<Comment>> {
         let mut comments: Vec<Comment> = Vec::new();
 
-        // Remove each of these lines after debug
-        let comment_content_list_test = data
-            .get("frameworkUpdates")?
-            .get( "entityBatchUpdate")?
-            .get("mutations")?;
-        let comment_test_string_pretty = serde_json::to_string_pretty(&comment_content_list_test).unwrap_or_default();
-        fs::write("2_main_comment_content_2.json", comment_test_string_pretty).await;
+        if create_json_files{
+            let comment_content_list_test = data
+                .get("frameworkUpdates")?
+                .get( "entityBatchUpdate")?
+                .get("mutations")?;
+            let comment_test_string_pretty = serde_json::to_string_pretty(&comment_content_list_test).unwrap_or_default();
+            let main_comment_file_name = format!("2_{}_main_comment_content_2_{}.json", request_count, request_count);
+            fs::write(main_comment_file_name, comment_test_string_pretty).await;
+        }
 
         let comment_content_list_actual = data
             .get("frameworkUpdates")?
@@ -160,27 +200,41 @@ impl YoutubeExtractor {
             .get("mutations")?
             .as_array()?;
 
-        println!("comment_content_list_actual length == {}", comment_content_list_actual.len());
+        debug!("comment_content_list_actual length == {}", comment_content_list_actual.len());
+
+        let not_initial_request = request_count > &1;
+        let continuation_item_obj_alias = match not_initial_request {
+            true => "appendContinuationItemsAction",
+            false => "reloadContinuationItemsCommand"
+        };
+        let continuation_items_index = match not_initial_request {
+            true => 0,
+            false => 1
+        };
+
         let continuation_items_list_actual = data
             .get("onResponseReceivedEndpoints")?
-            .get(1)?
-            .get("reloadContinuationItemsCommand")?
+            .get(continuation_items_index)?
+            .get(continuation_item_obj_alias)?
             .get("continuationItems")?
             .as_array()?;
 
-        let continuation_list_test = serde_json::to_string_pretty(&continuation_items_list_actual).unwrap_or_default();
-        fs::write("3_continuation_items_3.json", continuation_list_test).await;
+        if create_json_files{
+            let continuation_list_test = serde_json::to_string_pretty(&continuation_items_list_actual).unwrap_or_default();
+            let continuation_file_name = format!("3_{}_continuation_items_3_{}.json", request_count, request_count);
+            fs::write(continuation_file_name, continuation_list_test).await;
+        }
 
         for (index, comment_content) in comment_content_list_actual.iter().enumerate() {
             let comment_content = match self.get_comment_info(comment_content, video_id).await {
                 Some(content) => content,
                 None => {
-                    // println!("Skipping comment at index {} due to missing data", index);
-                    continue; // Skip this comment and continue with the next one
+                    continue;
                 }
             };
 
-            if (comment_content.reply_count > 0) {
+            // Getting individual reply continuation token
+            if comment_content.reply_count > 0 {
                 let mut comment_continuation_token = "".to_string();
 
                 for continuation_block in continuation_items_list_actual.iter() {
@@ -196,14 +250,13 @@ impl YoutubeExtractor {
                 }
 
                 if (comment_continuation_token.is_empty()) {
-                    println!("Failed to retrieve continuation token...")
+                    warn!("Failed to retrieve continuation token...")
                 } else {
-                    println!("Continuation Token {}", comment_continuation_token);
-                    let mut replies = self.reply_extractor(&api_key, &comment_continuation_token, &comment_content.reply_count, &comment_content.comment_id, &video_id).await?;
+                    let mut replies = self.reply_extractor(&api_key, &comment_continuation_token, &comment_content.reply_count, &comment_content.comment_id, &video_id, create_json_files).await?;
                     comments.append(&mut replies);
                 }
             } else {
-                println!("Did not attempt to get continuation token because replies are 0.")
+                debug!("Did not attempt to get continuation token because replies are 0.")
             }
 
             let owned_video_id = video_id.to_owned();
@@ -230,7 +283,7 @@ impl YoutubeExtractor {
         Some(comments)
     }
 
-    pub async fn comments_request(&self, api_key: &String, continuation: &String) -> Result<Value, Box<dyn std::error::Error>> {
+    pub async fn comments_request(&self, api_key: &String, continuation: &String, request_count: &usize, create_json_files: bool) -> Result<Value, Box<dyn std::error::Error>> {
         let url = format!("https://www.youtube.com/youtubei/v1/next?key={api_key}");
         let client = reqwest::Client::new();
         
@@ -267,14 +320,17 @@ impl YoutubeExtractor {
             .await
             .map_err(|e| YoutubeError::ApiRequestError(Box::new(e)))?;
 
-        println!("Main Comment Response Status: {}", response.status());
+        debug!("Comment Request Response Status: {}", response.status());
 
         let response_text = response.text().await?;
 
         let response_json: Value = serde_json::from_str(&response_text)?;
 
-        let response_string = serde_json::to_string_pretty(&response_json).unwrap_or_default();
-        fs::write("1_main_comment_response_1.json", response_string).await.unwrap();
+        if request_count != &0 && create_json_files{
+            let response_string = serde_json::to_string_pretty(&response_json).unwrap_or_default();
+            let main_comment_file_name = format!("1_{}_main_comment_response_1_{}.json", request_count, request_count);
+            fs::write(main_comment_file_name, response_string).await.unwrap();
+        }
 
         Ok(response_json)
     }
@@ -283,7 +339,7 @@ impl YoutubeExtractor {
         self.get_text_from_path(&ytcfg, &["INNERTUBE_API_KEY"]).ok_or(YoutubeError::ApiKeyNotFound)
     }
     pub fn generate_synthetic_continuation_token(&self, video_id: &str) -> String {
-        println!("🥎🥎 Using a synthetic continuation token!! 🥎🥎");
+        warn!("🥎🥎 Using a synthetic continuation token!! 🥎🥎");
         let token = format!("\x12\r\x12\x0b{video_id}\x18\x062'\"\\x11\"\x0b{video_id}0\x00x\x020\x00B\x10comments-section");
         general_purpose::STANDARD.encode(token.as_bytes())
     }
@@ -298,21 +354,64 @@ impl YoutubeExtractor {
         })
     }
 
-    pub async fn get_comments(&self, data: &Value, ytcfg: &Value, video_id: &str) -> Result<String, YoutubeError> {
-        let continuation_token = self.get_continuation_token(&data, &video_id);
+    pub async fn get_comments(&self, data: &Value, ytcfg: &Value, video_id: &str, max_requests: Option<usize>, create_json_files: bool) -> Result<String, YoutubeError> {
+        let initial_continuation_token = self.get_continuation_token(&data, &video_id);
         let api_key = self.get_api_key(&ytcfg)?;
 
-        println!("Continuation Token: {}", continuation_token);
-        println!("API Key: {}", api_key);
-        
-        let comments_data = self.comments_request(&api_key, &continuation_token).await?;
+        let mut all_comments: Vec<Comment> = Vec::new();
+        let mut current_continuation = initial_continuation_token;
+        let mut request_count = 0;
+        let max_reqs = max_requests.unwrap_or(50);
 
-        let comments = self.comment_extractor(&comments_data, &api_key, video_id).await.unwrap_or_default();
+        loop {
+            request_count += 1;
+            debug!("Making request #{} for comments...", request_count);
 
-        println!("Captured {} comments!", comments.len());
+            let comments_data = match self.comments_request(&api_key, &current_continuation, &request_count, create_json_files).await {
+                Ok(data) => data,
+                Err(e) => {
+                    error!("Error fetching comments on request {}: {:?}", request_count, e);
+                    break;
+                }
+            };
 
-        self.comment_data_to_json(&comments).await;
-        
-        Ok("Got comments".to_string())
+            let batch_comments = self.comment_extractor(&comments_data, &api_key, video_id, &request_count, create_json_files)
+                .await
+                .unwrap_or_default();
+
+            debug!("Extracted {} comments from batch #{}", batch_comments.len(), request_count);
+
+            all_comments.extend(batch_comments);
+
+            let next_continuation_token = self.get_next_continuation_token(&comments_data, &request_count).await;
+
+            match next_continuation_token {
+                Some(token) if !token.is_empty() => {
+                    current_continuation = token;
+                    debug!("Found next continuation token, continuing...");
+
+                    if request_count >= max_reqs {
+                        debug!("Reached maximum request limit ({}), stopping.", max_reqs);
+                        break;
+                    }
+
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                }
+                _ => {
+                    debug!("No more continuation tokens found. Finished fetching comments.");
+                    break;
+                }
+            }
+        }
+
+        debug!("Total comments captured: {}", all_comments.len());
+        debug!("Made {} API requests", request_count);
+
+        if create_json_files {
+            self.comment_data_to_json(&all_comments).await;
+        }
+        self.comment_data_to_json(&all_comments).await;
+
+        Ok(format!("Successfully fetched {} comments in {} requests", all_comments.len(), request_count))
     }
 }
