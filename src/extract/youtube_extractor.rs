@@ -2,6 +2,7 @@ use async_std::fs;
 use serde_json::{json, Value};
 use regex::Regex;
 use crate::models::VideoInfo;
+use crate::models::Comment;
 pub struct YoutubeExtractor;
 use tracing::{info, warn, error, debug, trace, instrument};
 
@@ -110,7 +111,7 @@ impl YoutubeExtractor{
         None
     }
 
-    async fn get_json(&self, video_id: &str) -> Result<String, Box<dyn std::error::Error>>{
+    async fn get_json(&self, video_id: &String) -> Result<String, Box<dyn std::error::Error>>{
         let url = format!("https://www.youtube.com/watch?v={}&bpctr=9999999999&has_verified=1", video_id);
         let html = reqwest::get(&url).await;
         let webpage = html.unwrap().text().await?;
@@ -278,9 +279,24 @@ impl YoutubeExtractor{
         }
     }
 
+    fn extract_video_id(&self, input: &str) -> Option<String> {
+        if input.len() == 11 && !input.contains('/') {
+            Some(input.to_string())
+        } else {
+            input.split("v=")
+                .nth(1)?
+                .split('&')
+                .next()
+                .map(|s| s.to_string())
+        }
+    }
+
     #[instrument(skip(self))]
-    pub async fn extract(&self, video_id: &str, create_json_files: bool){
-        let webpage = self.get_json(video_id).await.unwrap_or_default();
+    pub async fn extract(&self, video: &str) -> Result<(VideoInfo, Vec<Comment>), Box<dyn std::error::Error>>  {
+        let create_json_files = false;
+        let video_id = self.extract_video_id(video).unwrap_or_default();
+
+        let webpage = self.get_json(&video_id).await.unwrap_or_default();
         let initial_data = self.extract_initial_data(&webpage).unwrap_or_default();
 
         if create_json_files {
@@ -309,9 +325,12 @@ impl YoutubeExtractor{
         match comments {
             Ok(comments_data) => {
                 debug!(comments_length = comments_data.len(), "Successfully extracted comments");
+                Ok((video_info, comments_data))
+
             }
             Err(e) => {
                 error!(error = %e, video_id = video_id, "Failed to extract comments");
+                Ok((video_info, Vec::new()))
             }
         }
     }

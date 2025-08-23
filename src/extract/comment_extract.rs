@@ -17,7 +17,7 @@ impl YoutubeExtractor {
 
     pub async fn comment_data_to_json(&self, data: &Vec<Comment>) -> Result<String, Box<dyn std::error::Error>> {
         let string_json = serde_json::to_string_pretty(data)?;
-        fs::write("5_final_comment_data_5.json", string_json).await?;
+        fs::write("final_comment_data.json", string_json).await?;
         Ok("Successfully wrote comments to COMMENT.json".to_string())
     }
 
@@ -256,7 +256,7 @@ impl YoutubeExtractor {
                     comments.append(&mut replies);
                 }
             } else {
-                debug!("Did not attempt to get continuation token because replies are 0.")
+                // debug!("Did not attempt to get continuation token because replies are 0.")
             }
 
             let owned_video_id = video_id.to_owned();
@@ -354,7 +354,7 @@ impl YoutubeExtractor {
         })
     }
 
-    pub async fn get_comments(&self, data: &Value, ytcfg: &Value, video_id: &str, max_requests: Option<usize>, create_json_files: bool) -> Result<String, YoutubeError> {
+    pub async fn get_comments(&self, data: &Value, ytcfg: &Value, video_id: &str, max_requests: Option<usize>, create_json_files: bool) -> Result<Vec<Comment>, YoutubeError> {
         let initial_continuation_token = self.get_continuation_token(&data, &video_id);
         let api_key = self.get_api_key(&ytcfg)?;
 
@@ -412,6 +412,7 @@ impl YoutubeExtractor {
         }
         self.comment_data_to_json(&all_comments).await;
 
-        Ok(format!("Successfully fetched {} comments in {} requests", all_comments.len(), request_count))
+        // format!("Successfully fetched {} comments in {} requests", all_comments.len(), request_count)
+        Ok(all_comments)
     }
 }
