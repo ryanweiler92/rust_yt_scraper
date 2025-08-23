@@ -1,5 +1,7 @@
 # yt-scraper
 
+![Cover](assets/cover.png)
+
 A Rust library for scraping YouTube video metadata and comments.
 
 ## Features
