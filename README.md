@@ -69,8 +69,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (video_info, comments) = extractor.extract("dQw4w9WgXcQ").await?;
     
     println!("Title: {}", video_info.title);
-    println!("Channel: {}", video_info.channel_name);
-    println!("Views: {}", video_info.view_count);
+    println!("Channel: {}", video_info.channel);
+    println!("Views: {}", video_info.views);
     println!("Comments: {}", comments.len());
     
     Ok(())
