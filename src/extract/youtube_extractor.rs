@@ -313,7 +313,11 @@ impl YoutubeExtractor{
             fs::write("output.json", json_str).await.unwrap();
         }
 
-        let video_info = self.extract_video_info(&initial_data);
+        let mut video_info = self.extract_video_info(&initial_data);
+
+        if video_info.yt_id.is_empty() {
+            video_info.yt_id = video.to_string();
+        }
 
         if create_json_files {
             self.save_video_info_to_json(&video_info, "video_info.json").await?;
