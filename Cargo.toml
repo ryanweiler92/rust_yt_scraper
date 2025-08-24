@@ -1,6 +1,6 @@
 [package]
 name = "yt-scraper"
-version = "0.1.0"
+version = "0.1.1"
 description = "Scrape YouTube video metadata and comments."
 authors = ["Ryan Weiler ryanweiler92@gmail.com"]
 license = "MIT"
