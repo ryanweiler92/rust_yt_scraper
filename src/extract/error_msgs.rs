@@ -2,7 +2,6 @@
 pub enum YoutubeError {
     ApiKeyNotFound,
     ApiRequestError(Box<dyn std::error::Error>),
-    PlaceholderError(Box<dyn std::error::Error>),
 }
 
 impl From<Box<dyn std::error::Error>> for YoutubeError {
@@ -16,7 +15,6 @@ impl std::fmt::Display for YoutubeError {
         match self {
             YoutubeError::ApiKeyNotFound => write!(f, "🩻🩻 API key not found in YouTube config.. 🩻🩻"),
             YoutubeError::ApiRequestError(e) => write!(f, "🩻🩻 The API request for comment data failed. {} 🩻🩻", e),
-            YoutubeError::PlaceholderError(e) => write!(f, "🩻🩻 There was an error: {}🩻🩻", e),
         }
     }
 }

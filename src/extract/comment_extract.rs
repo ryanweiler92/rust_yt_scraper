@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use base64::{Engine as _, engine::general_purpose};
 use reqwest;
 use percent_encoding::percent_decode_str;
-use tracing::{info, warn, error, debug, trace, instrument};
+use tracing::{warn, error, debug};
 
 use crate::models::Comment;
 use crate::models::CommentContent;
@@ -60,7 +60,7 @@ impl YoutubeExtractor {
 
         if create_json_files{
             let replies_json_string = serde_json::to_string_pretty(&replies_json).unwrap_or_default();
-            fs::write("4_replies_4.json", replies_json_string).await;
+            let _ = fs::write("4_replies_4.json", replies_json_string).await;
         }
 
         let replies_usize: usize = *reply_count as usize;
@@ -75,7 +75,7 @@ impl YoutubeExtractor {
 
         let mut running_reply_count= 0;
 
-        for (index, comment_content) in reply_content_list_actual.iter().enumerate() {
+        for comment_content in reply_content_list_actual.iter() {
             let reply_content = match self.get_comment_info(comment_content, video_id).await {
                 Some(content) => {
                     running_reply_count += 1;
@@ -191,7 +191,7 @@ impl YoutubeExtractor {
                 .get("mutations")?;
             let comment_test_string_pretty = serde_json::to_string_pretty(&comment_content_list_test).unwrap_or_default();
             let main_comment_file_name = format!("2_{}_main_comment_content_2_{}.json", request_count, request_count);
-            fs::write(main_comment_file_name, comment_test_string_pretty).await;
+            let _ = fs::write(main_comment_file_name, comment_test_string_pretty).await;
         }
 
         let comment_content_list_actual = data
@@ -222,10 +222,10 @@ impl YoutubeExtractor {
         if create_json_files{
             let continuation_list_test = serde_json::to_string_pretty(&continuation_items_list_actual).unwrap_or_default();
             let continuation_file_name = format!("3_{}_continuation_items_3_{}.json", request_count, request_count);
-            fs::write(continuation_file_name, continuation_list_test).await;
+            let _ = fs::write(continuation_file_name, continuation_list_test).await;
         }
 
-        for (index, comment_content) in comment_content_list_actual.iter().enumerate() {
+        for comment_content in comment_content_list_actual.iter() {
             let comment_content = match self.get_comment_info(comment_content, video_id).await {
                 Some(content) => content,
                 None => {
@@ -249,14 +249,12 @@ impl YoutubeExtractor {
 
                 }
 
-                if (comment_continuation_token.is_empty()) {
+                if comment_continuation_token.is_empty() {
                     warn!("Failed to retrieve continuation token...")
                 } else {
                     let mut replies = self.reply_extractor(&api_key, &comment_continuation_token, &comment_content.reply_count, &comment_content.comment_id, &video_id, create_json_files).await?;
                     comments.append(&mut replies);
                 }
-            } else {
-                // debug!("Did not attempt to get continuation token because replies are 0.")
             }
 
             let owned_video_id = video_id.to_owned();
@@ -408,9 +406,8 @@ impl YoutubeExtractor {
         debug!("Made {} API requests", request_count);
 
         if create_json_files {
-            self.comment_data_to_json(&all_comments).await;
+            let _ = self.comment_data_to_json(&all_comments).await;
         }
-        self.comment_data_to_json(&all_comments).await;
 
         // format!("Successfully fetched {} comments in {} requests", all_comments.len(), request_count)
         Ok(all_comments)

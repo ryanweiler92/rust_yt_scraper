@@ -4,7 +4,7 @@ use regex::Regex;
 use crate::models::VideoInfo;
 use crate::models::Comment;
 pub struct YoutubeExtractor;
-use tracing::{info, warn, error, debug, trace, instrument};
+use tracing::{info, error, debug, instrument};
 
 
 impl YoutubeExtractor{
@@ -291,10 +291,19 @@ impl YoutubeExtractor{
         }
     }
 
+    pub async fn save_video_info_to_json(&self, video_info: &VideoInfo, file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let json_str = serde_json::to_string_pretty(video_info)?;
+        fs::write(file_path, json_str).await?;
+        info!("Video info saved to {}", file_path);
+        Ok(())
+    }
+
     #[instrument(skip(self))]
     pub async fn extract(&self, video: &str) -> Result<(VideoInfo, Vec<Comment>), Box<dyn std::error::Error>>  {
         let create_json_files = false;
         let video_id = self.extract_video_id(video).unwrap_or_default();
+
+        info!("Beginning extraction for video ID: {}", video_id);
 
         let webpage = self.get_json(&video_id).await.unwrap_or_default();
         let initial_data = self.extract_initial_data(&webpage).unwrap_or_default();
@@ -305,6 +314,10 @@ impl YoutubeExtractor{
         }
 
         let video_info = self.extract_video_info(&initial_data);
+
+        if create_json_files {
+            self.save_video_info_to_json(&video_info, "video_info.json").await?;
+        }
 
         debug!(
         title = %video_info.title,
@@ -317,14 +330,17 @@ impl YoutubeExtractor{
         upload_date = %video_info.upload_date,
         "Extracted video information"
     );
+
+        info!("Extracted video metadata...");
         
-        let ytcfg = self.extract_ytcfg(&webpage, create_json_files).await.unwrap();
+        let ytcfg = self.extract_ytcfg(&webpage, create_json_files).await?;
         
         let comments = self.get_comments(&initial_data, &ytcfg, &video_id, Some(25), create_json_files).await;
         
         match comments {
             Ok(comments_data) => {
                 debug!(comments_length = comments_data.len(), "Successfully extracted comments");
+                info!("Extracted {} comments...", comments_data.len());
                 Ok((video_info, comments_data))
 
             }
