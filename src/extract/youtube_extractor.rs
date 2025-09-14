@@ -28,7 +28,7 @@ impl YoutubeExtractor{
             fs::write("output.json", json_str).await.unwrap();
         }
 
-        let mut video_info = self.extract_video_info(&initial_data);
+        let mut video_info = self.extract_video_info(&initial_data, &video_id);
 
         if video_info.yt_id.is_empty() {
             video_info.yt_id = video_id.clone();
@@ -272,14 +272,9 @@ impl YoutubeExtractor{
             "subscribeButton", "subscribeButtonRenderer", "channelId"
         ]).unwrap_or_default()
     }
-    
-    fn get_video_thumbnail(&self, data: &Value) -> String {
-        self.get_text_from_path(&data, &[
-            "contents", "twoColumnWatchNextResults", "results",
-            "results", "contents", "1",
-            "videoSecondaryInfoRenderer", "owner", "videoOwnerRenderer", "thumbnail",
-            "thumbnails", "0", "url"
-        ]).unwrap_or_default()
+
+    fn get_video_thumbnail(&self, video_id: &str) -> String {
+        format!("https://img.youtube.com/vi/{}/maxresdefault.jpg", video_id)
     }
     
     fn get_upload_date(&self, data: &Value) -> String {
@@ -300,7 +295,7 @@ impl YoutubeExtractor{
         ]).unwrap_or_default()
     }
 
-    fn extract_video_info(&self, initial_data: &Value) -> VideoInfo {
+    fn extract_video_info(&self, initial_data: &Value, video_id: &str) -> VideoInfo {
         VideoInfo {
             title: self.get_text_from_path(initial_data, &[
                 "contents", "twoColumnWatchNextResults", "results",
@@ -331,7 +326,7 @@ impl YoutubeExtractor{
 
             like_count: self.get_likes(initial_data),
             
-            video_thumbnail: self.get_video_thumbnail(initial_data),
+            video_thumbnail: self.get_video_thumbnail(&video_id),
             
             upload_date: self.get_upload_date(initial_data),
             
