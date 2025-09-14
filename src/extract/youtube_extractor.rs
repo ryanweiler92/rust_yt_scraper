@@ -13,6 +13,65 @@ impl YoutubeExtractor{
         Self
     }
 
+    #[instrument(skip(self))]
+    pub async fn extract(&self, video: &str) -> Result<(VideoInfo, Vec<Comment>), Box<dyn std::error::Error>>  {
+        let create_json_files = false;
+        let video_id = self.extract_video_id(video).unwrap_or_default();
+
+        info!("Beginning extraction for video ID: {}", video_id);
+
+        let webpage = self.get_json(&video_id).await.unwrap_or_default();
+        let initial_data = self.extract_initial_data(&webpage).unwrap_or_default();
+
+        if create_json_files {
+            let json_str = serde_json::to_string_pretty(&initial_data).unwrap_or_default();
+            fs::write("output.json", json_str).await.unwrap();
+        }
+
+        let mut video_info = self.extract_video_info(&initial_data);
+
+        if video_info.yt_id.is_empty() {
+            video_info.yt_id = video_id.clone();
+        }
+
+        if create_json_files {
+            self.save_video_info_to_json(&video_info, "video_info.json").await?;
+        }
+
+        debug!(
+        title = %video_info.title,
+        channel = %video_info.channel,
+        channel_id = %video_info.channel_id,
+        yt_id = %video_info.yt_id,
+        views = video_info.views,
+        comment_count = video_info.comment_count,
+        like_count = video_info.like_count,
+        upload_date = %video_info.upload_date,
+        "Extracted video information"
+    );
+
+        info!("Extracted video metadata...");
+
+        let ytcfg = self.extract_ytcfg(&webpage, create_json_files).await?;
+
+        let comments = self.get_comments(&initial_data, &ytcfg, &video_id, Some(25), create_json_files).await;
+
+
+
+        match comments {
+            Ok(comments_data) => {
+                debug!(comments_length = comments_data.len(), "Successfully extracted comments");
+                info!("Extracted {} comments...", comments_data.len());
+                Ok((video_info, comments_data))
+
+            }
+            Err(e) => {
+                error!(error = %e, video_id = &video_info.yt_id, "Failed to extract comments");
+                Ok((video_info, Vec::new()))
+            }
+        }
+    }
+
     pub async fn extract_ytcfg(&self, webpage: &str, create_json_files: bool) -> Result<Value, Box<dyn std::error::Error>> {
         // Pattern 1: ytcfg.set({...})
         let pattern1 = Regex::new(r"ytcfg\.set\s*\(\s*(\{.+?\})\s*\)")?;
@@ -216,9 +275,10 @@ impl YoutubeExtractor{
     
     fn get_video_thumbnail(&self, data: &Value) -> String {
         self.get_text_from_path(&data, &[
-            "contents", "twoColumnWatchNextResults", "secondaryResults", 
-            "secondaryResults", "results", "0", "compactVideoRenderer",
-            "thumbnail", "thumbnails", "1", "url"
+            "contents", "twoColumnWatchNextResults", "results",
+            "results", "contents", "1",
+            "videoSecondaryInfoRenderer", "owner", "videoOwnerRenderer", "thumbnail",
+            "thumbnails", "0", "url"
         ]).unwrap_or_default()
     }
     
@@ -296,62 +356,5 @@ impl YoutubeExtractor{
         fs::write(file_path, json_str).await?;
         info!("Video info saved to {}", file_path);
         Ok(())
-    }
-
-    #[instrument(skip(self))]
-    pub async fn extract(&self, video: &str) -> Result<(VideoInfo, Vec<Comment>), Box<dyn std::error::Error>>  {
-        let create_json_files = false;
-        let video_id = self.extract_video_id(video).unwrap_or_default();
-
-        info!("Beginning extraction for video ID: {}", video_id);
-
-        let webpage = self.get_json(&video_id).await.unwrap_or_default();
-        let initial_data = self.extract_initial_data(&webpage).unwrap_or_default();
-
-        if create_json_files {
-            let json_str = serde_json::to_string_pretty(&initial_data).unwrap_or_default();
-            fs::write("output.json", json_str).await.unwrap();
-        }
-
-        let mut video_info = self.extract_video_info(&initial_data);
-
-        if video_info.yt_id.is_empty() {
-            video_info.yt_id = video.to_string();
-        }
-
-        if create_json_files {
-            self.save_video_info_to_json(&video_info, "video_info.json").await?;
-        }
-
-        debug!(
-        title = %video_info.title,
-        channel = %video_info.channel,
-        channel_id = %video_info.channel_id,
-        yt_id = %video_info.yt_id,
-        views = video_info.views,
-        comment_count = video_info.comment_count,
-        like_count = video_info.like_count,
-        upload_date = %video_info.upload_date,
-        "Extracted video information"
-    );
-
-        info!("Extracted video metadata...");
-        
-        let ytcfg = self.extract_ytcfg(&webpage, create_json_files).await?;
-        
-        let comments = self.get_comments(&initial_data, &ytcfg, &video_id, Some(25), create_json_files).await;
-        
-        match comments {
-            Ok(comments_data) => {
-                debug!(comments_length = comments_data.len(), "Successfully extracted comments");
-                info!("Extracted {} comments...", comments_data.len());
-                Ok((video_info, comments_data))
-
-            }
-            Err(e) => {
-                error!(error = %e, video_id = video_id, "Failed to extract comments");
-                Ok((video_info, Vec::new()))
-            }
-        }
     }
 }

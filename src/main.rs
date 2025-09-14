@@ -9,5 +9,5 @@ async fn main() {
         .init();
 
     let youtube_extractor = YoutubeExtractor::new();
-    let _data = youtube_extractor.extract("ztWCPu8f5-Q").await;
+    let _data = youtube_extractor.extract("https://www.youtube.com/watch?v=gXyFe7jcufE").await;
 }

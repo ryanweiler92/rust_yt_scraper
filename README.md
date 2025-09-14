@@ -15,7 +15,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-yt-scraper = "0.1.0"
+yt-scraper = { git = "https://github.com/ryanweiler92/rust_yt_scraper" }
 ```
 
 ## Example Video Metadata Extraction
