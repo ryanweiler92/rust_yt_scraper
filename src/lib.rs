@@ -3,3 +3,148 @@ pub mod models;
 
 pub use extract::YoutubeExtractor;
 pub use models::{VideoInfo, Comment, CommentContent};
+
+// Python bindings (optional feature `python`)
+// Build with: `maturin develop --features python` or `maturin build --features python`
+#[cfg(feature = "python")]
+mod python_bindings {
+    use super::{YoutubeExtractor, VideoInfo, Comment};
+    use pyo3::prelude::*;
+
+    #[pyclass]
+    #[derive(Clone)]
+    struct PyVideoInfo {
+        #[pyo3(get)]
+        title: String,
+        #[pyo3(get)]
+        channel: String,
+        #[pyo3(get)]
+        channel_id: String,
+        #[pyo3(get)]
+        description: String,
+        #[pyo3(get)]
+        yt_id: String,
+        #[pyo3(get)]
+        views: u64,
+        #[pyo3(get)]
+        comment_count: u64,
+        #[pyo3(get)]
+        like_count: u64,
+        #[pyo3(get)]
+        video_thumbnail: String,
+        #[pyo3(get)]
+        upload_date: String,
+        #[pyo3(get)]
+        channel_thumbnail: String,
+    }
+
+    impl From<VideoInfo> for PyVideoInfo {
+        fn from(v: VideoInfo) -> Self {
+            Self {
+                title: v.title,
+                channel: v.channel,
+                channel_id: v.channel_id,
+                description: v.description,
+                yt_id: v.yt_id,
+                views: v.views,
+                comment_count: v.comment_count,
+                like_count: v.like_count,
+                video_thumbnail: v.video_thumbnail,
+                upload_date: v.upload_date,
+                channel_thumbnail: v.channel_thumbnail,
+            }
+        }
+    }
+
+    #[pyclass]
+    #[derive(Clone)]
+    struct PyComment {
+        #[pyo3(get)]
+        comment_id: String,
+        #[pyo3(get)]
+        channel_id: String,
+        #[pyo3(get)]
+        video_id: String,
+        #[pyo3(get)]
+        display_name: String,
+        #[pyo3(get)]
+        user_verified: bool,
+        #[pyo3(get)]
+        thumbnail: String,
+        #[pyo3(get)]
+        content: String,
+        #[pyo3(get)]
+        published_time: String,
+        #[pyo3(get)]
+        like_count: i32,
+        #[pyo3(get)]
+        reply_count: i32,
+        #[pyo3(get)]
+        comment_level: i32,
+        #[pyo3(get)]
+        reply_to: String,
+        #[pyo3(get)]
+        reply_order: i32,
+    }
+
+    impl From<Comment> for PyComment {
+        fn from(c: Comment) -> Self {
+            Self {
+                comment_id: c.comment_id,
+                channel_id: c.channel_id,
+                video_id: c.video_id,
+                display_name: c.display_name,
+                user_verified: c.user_verified,
+                thumbnail: c.thumbnail,
+                content: c.content,
+                published_time: c.published_time,
+                like_count: c.like_count,
+                reply_count: c.reply_count,
+                comment_level: c.comment_level,
+                reply_to: c.reply_to,
+                reply_order: c.reply_order,
+            }
+        }
+    }
+
+    fn run_async<F, T>(fut: F) -> Result<T, Box<dyn std::error::Error>>
+    where
+        F: std::future::Future<Output = Result<T, Box<dyn std::error::Error>>> + Send + 'static,
+        T: Send + 'static,
+    {
+        let rt = tokio::runtime::Runtime::new()?;
+        let res = rt.block_on(fut)?;
+        Ok(res)
+    }
+
+    #[pyfunction]
+    fn extract(video: &str, max_requests: Option<usize>) -> PyResult<(PyVideoInfo, Vec<PyComment>)> {
+        let extractor = YoutubeExtractor::new();
+        let fut = async {
+            let (info, mut comments) = extractor.extract(video).await?;
+
+            // Limit comment fetch depth if requested by user by truncating for now
+            if let Some(_mr) = max_requests {
+                // The current Rust API already constrains requests internally when called directly; here we return what `extract` fetched.
+                // Future: wire `max_requests` through to `get_comments` if public API changes.
+            }
+
+            let py_info: PyVideoInfo = info.into();
+            let py_comments: Vec<PyComment> = comments.drain(..).map(Into::into).collect();
+            Ok::<_, Box<dyn std::error::Error>>((py_info, py_comments))
+        };
+
+        match run_async(fut) {
+            Ok((info, comments)) => Ok((info, comments)),
+            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(format!("Extraction failed: {}", e))),
+        }
+    }
+
+    #[pymodule]
+    fn yt_scraper(_py: Python, m: &PyModule) -> PyResult<()> {
+        m.add_function(wrap_pyfunction!(extract, m)?)?;
+        m.add_class::<PyVideoInfo>()?;
+        m.add_class::<PyComment>()?;
+        Ok(())
+    }
+}

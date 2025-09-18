@@ -1,0 +1,16 @@
+[build-system]
+requires = ["maturin>=1.4,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "yt-scraper"
+description = "Python bindings for the yt-scraper Rust library"
+requires-python = ">=3.8"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Ryan Weiler", email = "ryanweiler92@gmail.com" }]
+keywords = ["youtube", "scraper", "rust", "bindings"]
+
+[tool.maturin]
+features = ["python"]
+module-name = "yt_scraper"
