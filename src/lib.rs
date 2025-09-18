@@ -6,7 +6,7 @@ pub use models::{VideoInfo, Comment, CommentContent};
 
 #[cfg(feature = "python")]
 mod python_bindings {
-    use super::{YoutubeExtractor, VideoInfo, Comment};
+    use super::{Comment, VideoInfo, YoutubeExtractor};
     use pyo3::prelude::*;
     use pyo3::types::PyDict;
 
@@ -61,8 +61,13 @@ mod python_bindings {
             d.set_item("channel_thumbnail", &self.channel_thumbnail).unwrap();
             d
         }
+
         fn __repr__(&self) -> String {
-            format!("<PyVideoInfo title={!r} channel={!r} views={}>", self.title, self.channel, self.views)
+            // Rust doesn't support Python's !r; use {:?} for debug
+            format!(
+                "<PyVideoInfo title={:?} channel={:?} views={}>",
+                self.title, self.channel, self.views
+            )
         }
     }
 
@@ -123,8 +128,9 @@ mod python_bindings {
             d.set_item("reply_order", self.reply_order).unwrap();
             d
         }
+
         fn __repr__(&self) -> String {
-            format!("<PyComment by={!r} likes={}>", self.display_name, self.like_count)
+            format!("<PyComment by={:?} likes={}>", self.display_name, self.like_count)
         }
     }
 
@@ -140,9 +146,11 @@ mod python_bindings {
 
     // Return dicts: (video_info: dict, comments: list[dict])
     #[pyfunction]
-    fn extract(py: Python<'_>, video: &str, max_requests: Option<usize>) -> PyResult<(PyObject, Vec<PyObject>)> {
+    #[pyo3(signature = (video, max_requests=None))]
+    fn extract(py: Python<'_>, video: &str, _max_requests: Option<usize>) -> PyResult<(PyObject, Vec<PyObject>)> {
         let extractor = YoutubeExtractor::new();
         let video = video.to_owned();
+
         let fut = async move {
             let (info, mut comments) = extractor.extract(&video).await?;
             let py_info: PyVideoInfo = info.into();
@@ -152,12 +160,11 @@ mod python_bindings {
 
         match run_async(fut) {
             Ok((info, comments)) => {
-                // convert to dicts tied to 'py' and move-owned as PyObject
                 let vi_dict = info.to_dict(py).into_py(py);
                 let comment_dicts = comments
                     .into_iter()
                     .map(|c| c.to_dict(py).into_py(py))
-                    .collect();
+                    .collect::<Vec<PyObject>>();
                 Ok((vi_dict, comment_dicts))
             }
             Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(format!("Extraction failed: {}", e))),
