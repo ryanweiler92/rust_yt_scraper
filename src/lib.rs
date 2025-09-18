@@ -120,8 +120,9 @@ mod python_bindings {
     #[pyfunction]
     fn extract(video: &str, max_requests: Option<usize>) -> PyResult<(PyVideoInfo, Vec<PyComment>)> {
         let extractor = YoutubeExtractor::new();
-        let fut = async {
-            let (info, mut comments) = extractor.extract(video).await?;
+        let video = video.to_owned(); // Convert to owned String
+        let fut = async move {
+            let (info, mut comments) = extractor.extract(&video).await?;
 
             // Limit comment fetch depth if requested by user by truncating for now
             if let Some(_mr) = max_requests {
@@ -141,7 +142,7 @@ mod python_bindings {
     }
 
     #[pymodule]
-    fn yt_scraper(_py: Python, m: &PyModule) -> PyResult<()> {
+    fn yt_scraper(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
         m.add_function(wrap_pyfunction!(extract, m)?)?;
         m.add_class::<PyVideoInfo>()?;
         m.add_class::<PyComment>()?;
